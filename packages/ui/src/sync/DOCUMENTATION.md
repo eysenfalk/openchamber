@@ -111,6 +111,18 @@ client's config cache, otherwise the refresh would be answered from the copy
 cached seconds earlier. A re-read that returns an identical list keeps the
 objects already in the stores, so nothing re-renders.
 
+**Scope.** OpenCode announces a catalog change once for every directory it
+serves: a global config file changes all of them, and each booted location says
+so with its own `location.directory`. The burst therefore also collects the
+directories (`catalog-reload-plan.ts` decides what they reach): a directory
+with a child store re-reads its own slice, the Settings and composer stores
+re-read when the active project or the client's directory is among them, and a
+directory nothing has open re-reads nothing. Without this, one global config
+change made every served directory re-read every open directory and every
+Settings store, so the cost grew with the square of the directories OpenCode
+serves. A `global` announcement and the `project` kind still reach
+everything.
+
 **The model list.** OpenCode 2.0.8 removed the `catalog.updated` storm and
 replaced it with `provider.updated` and `model.updated`, which it publishes
 only when the list they name actually changed; `events.ts` translates them into

@@ -214,6 +214,8 @@ Settings fields are declared once in the settings registry (`packages/ui/src/lib
 
 Session defaults belong to the active runtime. Switching instances clears the in-memory defaults and directory config snapshots; persisted config hydrates only when its recorded runtime matches. Legacy snapshots without an owner are refetched. Initialization, health checks, and directory activation reject obsolete continuations, including A to B to A switches.
 
+Every project opened in a runtime keeps a config snapshot, and the snapshots are persisted so the pickers paint from them on the next start while `activateDirectory` revalidates. Their provider and agent lists are nearly always identical between projects, so `configStorePersistence.ts` stores each distinct list once and the snapshots refer to it, under `directoryScopedShared`; inline, every snapshot repeated the whole model catalog and enough opened projects outgrew browser storage, which dropped them all. Storage written in the older inline `directoryScoped` form still hydrates, and an older build reading the new form finds no snapshots and loads them again. A snapshot that refers to a missing list is dropped, never restored empty.
+
 Configured project and global model identifiers remain selected through provider discovery gaps. A draft can display its configured identifier before model metadata arrives. Catalog absence never selects Big Pickle in its place. An unknown settings document defers fallback selection; a successful document with no configured model permits the normal OpenCode fallback. Saved thinking preferences stay in settings, while a discovered model's supported variants determine the effective thinking level.
 
 Project defaults include `defaultAgent`, `defaultModel`, and `defaultVariant`.

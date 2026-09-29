@@ -705,7 +705,72 @@ describe('useConfigStore provider persistence', () => {
 
     const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
     expect(persisted.state.selectedProviderId).toBe('');
-    expect(persisted.state.directoryScoped[DIRECTORY].selectedProviderId).toBe('');
+    expect(persisted.state.directoryScopedShared.snapshots[DIRECTORY].selectedProviderId).toBe('');
+  });
+
+  test('persists equal provider and agent lists once and restores every directory from them', async () => {
+    const snapshot = (providerId: string) => ({
+      // Each directory loads its own copy: equal content, different arrays.
+      providers: [provider(providerId)],
+      agents: [testAgent('build')],
+      currentProviderId: providerId,
+      currentModelId: `${providerId}-model`,
+      currentAgentName: 'build',
+      selectedProviderId: providerId,
+      agentModelSelections: {},
+      defaultProviders: { default: providerId },
+    });
+    useConfigStore.setState({
+      activeDirectoryKey: DIRECTORY,
+      directoryScoped: {
+        [DIRECTORY]: snapshot('shared'),
+        [OTHER_DIRECTORY]: snapshot('shared'),
+        '/tmp/project-with-own-provider': snapshot('own'),
+      },
+    });
+
+    const persisted = JSON.parse(storage.get(STORAGE_KEY) ?? '{}');
+    expect(persisted.state.directoryScoped).toBeUndefined();
+    expect(persisted.state.directoryScopedShared.providerLists).toHaveLength(2);
+    expect(persisted.state.directoryScopedShared.agentLists).toHaveLength(1);
+
+    // Clearing the store writes storage too; put the shared form back.
+    const written = storage.get(STORAGE_KEY) ?? '';
+    useConfigStore.setState({ directoryScoped: {} });
+    storage.set(STORAGE_KEY, written);
+    await useConfigStore.persist.rehydrate();
+
+    const restored = useConfigStore.getState().directoryScoped;
+    expect(restored[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['shared']);
+    expect(restored[OTHER_DIRECTORY]?.providers).toBe(restored[DIRECTORY]?.providers);
+    expect(restored['/tmp/project-with-own-provider']?.providers.map((entry) => entry.id)).toEqual(['own']);
+    expect(restored[OTHER_DIRECTORY]?.currentModelId).toBe('shared-model');
+    expect(restored[DIRECTORY]?.agents.map((agent) => agent.name)).toEqual(['build']);
+    expect(restored[OTHER_DIRECTORY]?.agents).toBe(restored[DIRECTORY]?.agents);
+  });
+
+  test('a shared snapshot pointing at a missing list is dropped, not restored empty', async () => {
+    useConfigStore.setState({ directoryScoped: {} });
+    storage.set(STORAGE_KEY, JSON.stringify({
+      state: {
+        configRuntimeKey: getRuntimeKey(),
+        activeDirectoryKey: DIRECTORY,
+        directoryScopedShared: {
+          providerLists: [[provider('kept')]],
+          agentLists: [[]],
+          snapshots: {
+            [DIRECTORY]: { providers: 0, agents: 0, currentProviderId: 'kept', currentModelId: 'kept-model', currentAgentName: undefined, selectedProviderId: 'kept', agentModelSelections: {}, defaultProviders: {} },
+            [OTHER_DIRECTORY]: { providers: 3, agents: 0, currentProviderId: 'x', currentModelId: 'x', currentAgentName: undefined, selectedProviderId: 'x', agentModelSelections: {}, defaultProviders: {} },
+          },
+        },
+      },
+      version: 0,
+    }));
+    await useConfigStore.persist.rehydrate();
+
+    const restored = useConfigStore.getState().directoryScoped;
+    expect(restored[DIRECTORY]?.providers.map((entry) => entry.id)).toEqual(['kept']);
+    expect(restored[OTHER_DIRECTORY]).toBeUndefined();
   });
 
   test('setAgent applies settings default variant for an agent configured model', () => {

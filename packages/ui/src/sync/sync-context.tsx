@@ -72,6 +72,8 @@ import {
 } from "./vscode-permission-auto-accept"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
+import { getConfigDirectory } from "@/stores/useAgentsStore"
+import { GLOBAL_CATALOG_SCOPE, planCatalogReload } from "./catalog-reload-plan"
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
 import { refreshSpacesJourney, useSpacesStore } from "@/lib/spaces/spaces-store"
@@ -1482,21 +1484,39 @@ async function resyncDirectoryAfterReconnect(
 }
 
 /**
+ * Whether the Settings and composer stores read this directory's catalog.
+ * They follow the active project (`getConfigDirectory`) and the directory the
+ * client talks to, which differ inside a worktree.
+ */
+const isActiveCatalogDirectory = (directory: string): boolean => {
+  const active = [opencodeClient.getDirectory(), getConfigDirectory()]
+  return active.some((candidate) => Boolean(candidate) && normalizeEventDirectory(candidate ?? "") === directory)
+}
+
+/**
  * OpenCode reports a catalog change (`config.updated`, `agent.updated`, ...)
  * without saying what changed, so the affected slice is re-read rather than
- * patched. Agents, commands, config and providers resolve per directory, so
- * every open directory refreshes its own copy; projects are global.
+ * patched. Agents, commands, config and providers resolve per directory, and
+ * OpenCode announces a change once for every directory it serves (a global
+ * config file changes all of them), so each announcement re-reads only its own
+ * directory's copy; projects are global.
  *
  * The sync stores only hold what chat needs; the Settings lists and the
  * composer read their own stores, which `refreshStoresForCatalogKind` re-reads
- * for the same kind.
+ * for the same kind. `planCatalogReload` decides which of them a burst reaches.
  */
-async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager): Promise<void> {
+async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager, scopes: ReadonlySet<string>): Promise<void> {
+  const plan = planCatalogReload(kind, scopes, {
+    isActive: isActiveCatalogDirectory,
+    hasStore: (directory) => childStores.getChild(directory) !== undefined,
+  })
+  if (!plan) return
+
   // Before anything re-reads: a fresh GET must not be served the config the
   // client cached seconds ago.
   if (kind === "config") opencodeClient.clearConfigCache()
 
-  void refreshStoresForCatalogKind(kind)
+  if (plan.refreshSettingsStores) void refreshStoresForCatalogKind(kind)
 
   if (kind === "project") {
     const projects = await opencodeClient.listProjects().catch(() => null)
@@ -1506,7 +1526,13 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
   // No sync-store slice of their own: their consumers read them on demand.
   if (kind === "skill" || kind === "plugin" || kind === "websearch") return
 
-  await Promise.all([...childStores.children.entries()].map(async ([directory, store]) => {
+  const targets = plan.childStores === "all"
+    ? [...childStores.children.entries()]
+    : plan.childStores.flatMap((directory) => {
+      const store = childStores.getChild(directory)
+      return store ? [[directory, store] as const] : []
+    })
+  await Promise.all(targets.map(async ([directory, store]) => {
     try {
       if (kind === "agent") {
         store.setState({ agent: await opencodeClient.listAgents(directory) })
@@ -1535,23 +1561,26 @@ async function reloadCatalog(kind: CatalogKind, childStores: ChildStoreManager):
 }
 
 /**
- * One saved file makes v2 rebuild several catalogs, so the events arrive in a
- * burst. Collect the kinds and re-read each one once the burst settles; the
- * lists are whole-slice reads, so a later event supersedes an earlier one of
- * the same kind anyway.
+ * One saved file makes v2 rebuild several catalogs, in every directory it
+ * serves, so the events arrive in a burst. Collect the kinds and their
+ * directories and re-read each kind once the burst settles; the lists are
+ * whole-slice reads, so a later event supersedes an earlier one of the same
+ * kind anyway.
  */
 const CATALOG_RELOAD_DEBOUNCE_MS = 250
-const pendingCatalogKinds = new Set<CatalogKind>()
+const pendingCatalogScopes = new Map<CatalogKind, Set<string>>()
 let catalogReloadTimer: ReturnType<typeof setTimeout> | null = null
 
-function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager): void {
-  pendingCatalogKinds.add(kind)
+function scheduleCatalogReload(kind: CatalogKind, childStores: ChildStoreManager, scope: string): void {
+  const scopes = pendingCatalogScopes.get(kind) ?? new Set<string>()
+  scopes.add(scope === GLOBAL_CATALOG_SCOPE ? scope : normalizeEventDirectory(scope))
+  pendingCatalogScopes.set(kind, scopes)
   if (catalogReloadTimer) clearTimeout(catalogReloadTimer)
   catalogReloadTimer = setTimeout(() => {
     catalogReloadTimer = null
-    const kinds = [...pendingCatalogKinds]
-    pendingCatalogKinds.clear()
-    for (const pending of kinds) void reloadCatalog(pending, childStores)
+    const pending = [...pendingCatalogScopes]
+    pendingCatalogScopes.clear()
+    for (const [pendingKind, pendingScopes] of pending) void reloadCatalog(pendingKind, childStores, pendingScopes)
   }, CATALOG_RELOAD_DEBOUNCE_MS)
 }
 
@@ -1766,7 +1795,7 @@ export function handleEvent(
         useGlobalSyncStore.setState({ reload: "pending" })
       }
     } else if (result.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
+      scheduleCatalogReload(result.kind, childStores, GLOBAL_CATALOG_SCOPE)
     }
     // On server.connected, re-bootstrap all directories
     // but only if not during recent boot
@@ -1789,6 +1818,11 @@ export function handleEvent(
   }
 
   // Directory events
+  if (payload.type === "catalog.updated") {
+    scheduleCatalogReload(payload.properties.kind, childStores, directory)
+    return
+  }
+
   let store = childStores.getChild(directory)
   let resolvedDirectory = directory
 
@@ -1815,8 +1849,6 @@ export function handleEvent(
     const result = reduceGlobalEvent(payload)
     if (result?.type === "refresh") {
       useGlobalSyncStore.setState({ reload: "pending" })
-    } else if (result?.type === "catalog") {
-      scheduleCatalogReload(result.kind, childStores)
     }
     return
   }

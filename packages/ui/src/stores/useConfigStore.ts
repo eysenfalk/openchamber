@@ -26,6 +26,7 @@ import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
+import { restoreDirectorySnapshots, shareDirectorySnapshots, type SharedDirectorySnapshots } from "./configStorePersistence";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -973,6 +974,8 @@ const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
     const at = loadedAt.get(key);
     return typeof at === 'number' && Date.now() - at < CONFIG_REFRESH_TTL_MS;
 };
+
+type PersistedDirectorySnapshots = SharedDirectorySnapshots<DirectoryScopedConfig, ProviderWithModelList, Agent>;
 
 interface DirectoryScopedConfig {
     providersLoaded?: boolean;
@@ -3798,9 +3801,14 @@ export const useConfigStore = create<ConfigStore>()(
                 merge: (persistedState, currentState) => {
                     // SAFETY: Zustand's storage boundary supplies an unknown
                     // partial store. Only an explicitly matching runtime may hydrate it.
-                    const persisted = persistedState as Partial<ConfigStore> | undefined;
+                    const persisted = persistedState as (Partial<ConfigStore> & { directoryScopedShared?: PersistedDirectorySnapshots }) | undefined;
                     if (!persisted || persisted.configRuntimeKey !== getRuntimeKey()) return currentState;
-                    return hydrateActiveDirectorySnapshot({ ...currentState, ...persisted });
+                    const { directoryScopedShared, ...persistedFields } = persisted;
+                    // Storage written before the shared form holds the snapshots inline.
+                    const directoryScoped = directoryScopedShared
+                        ? restoreDirectorySnapshots(directoryScopedShared, (snapshot, lists): DirectoryScopedConfig => ({ ...snapshot, ...lists }))
+                        : persistedFields.directoryScoped;
+                    return hydrateActiveDirectorySnapshot({ ...currentState, ...persistedFields, ...(directoryScoped ? { directoryScoped } : {}) });
                 },
                 // Stale-while-revalidate: persist the last-known provider/agent
                 // snapshots so the model/agent pickers paint instantly on cold
@@ -3810,7 +3818,7 @@ export const useConfigStore = create<ConfigStore>()(
                 partialize: (state) => ({
                     configRuntimeKey: state.configRuntimeKey,
                     activeDirectoryKey: state.activeDirectoryKey,
-                    directoryScoped: Object.fromEntries(
+                    directoryScopedShared: shareDirectorySnapshots<ProviderWithModelList, Agent, DirectoryScopedConfig>(Object.fromEntries(
                         Object.entries(state.directoryScoped).map(([directoryKey, snapshot]) => [
                             directoryKey,
                             {
@@ -3818,7 +3826,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 selectedProviderId: sanitizePersistedSelectedProviderId(snapshot.selectedProviderId),
                             },
                         ]),
-                    ),
+                    )),
                     providers: state.providers,
                     agents: state.agents,
                     currentProviderId: state.currentProviderId,
