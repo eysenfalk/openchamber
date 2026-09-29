@@ -14,10 +14,14 @@ or extending these scripts. The methodology rules they enforce come from
 | `bun run profile:animation` | What a CSS animation costs, isolated from the app. |
 | `bun run profile:switch` | How long switching sessions from the sidebar takes, cold and warm. |
 | `bun run profile:startup` | How long a packaged Desktop build takes from process spawn to a visible window and a mounted interface. |
+| `bun run profile:scroll` | How smoothly the chat, the sidebar or the diff scrolls: frames against the display's refresh, and what owned the slow ones. |
 | `bun run profile:browser` | A manually driven capture, for interactions that cannot be scripted. |
 
 All of them measure a real browser over CDP. Pass `--help` to any of them for
 the full option list.
+
+`bun run perf:workspace` is not a capture: it builds and serves the
+production-scale workspace the captures run against.
 
 ## Before Measuring Anything
 
@@ -46,6 +50,11 @@ cd <a project directory> && node <repo>/packages/web/bin/cli.js serve --port 459
 
 `profile:idle` and `profile:session` need a running server; `profile:animation`
 serves its own fixture and needs nothing.
+
+**Measure at production scale.** Most costs here grow with the number of
+projects, sessions, messages or changed files, and a development workspace is
+below every threshold. Use `perf:workspace` (below) unless a report names a
+smaller scale.
 
 ## profile:idle
 
@@ -247,6 +256,84 @@ the sidebar, so pass explicit ids to compare runs across days. The row must be
 present in the sidebar; the command fails rather than measuring a click on
 nothing.
 
+## perf:workspace
+
+Builds a workspace at the scale users report and serves it with the fixture
+provider registered. Everything lives under one root with its own `HOME`, so
+it never touches the user's OpenCode or OpenChamber data.
+
+```bash
+bun run build:ui && bun run build:web
+bun run perf:workspace -- create --massive-repo      # ~5 minutes
+bun run perf:workspace -- serve                      # port 4599, until Ctrl-C
+```
+
+Defaults: 400 projects (each a one-commit git repository), 1,000 sessions
+spread unevenly over them (project *i* gets a share proportional to
+1/(*i*+1)), and one long session of 55 agent turns in the first project,
+about 1,200 messages with 20 tool parts per turn. `--massive-repo` adds a
+second project with 100k files, ~1k changed files, one 20k-line file rewritten
+on every other line and 300 untracked files. `serve` prints the long
+session's id and the paths; `workspace.json` in the root records them.
+
+Sessions and messages are created through `openchamber session` against the
+fixture provider (`perf/agent-20tools-6000cps` for the long session), so
+OpenCode stores them the way it stores real ones. Nothing writes OpenCode's
+private database schema. The command strips inherited `OPENCHAMBER_*` and
+`OPENCODE_*` variables from the server and every CLI call it makes.
+
+To reach a project's session from a capture, pass one of its sessions:
+`openchamber session list --dir <project> --port 4599` run with
+`HOME=<root>/home OPENCHAMBER_DATA_DIR=<root>/home/.config/openchamber`.
+
+## profile:scroll
+
+Scrolls one surface with real wheel input and reports what the display got:
+frame intervals, the share of frames that missed a refresh, the longest frame,
+and Long Animation Frame attribution (which script owned each slow frame and
+how much of it was forced layout). Requests and `localStorage` writes made
+during the scroll are listed too, because background work competes for the
+same frames.
+
+```bash
+bun run profile:scroll -- --url http://127.0.0.1:4599 --surface chat --session <id>
+bun run profile:scroll -- --url http://127.0.0.1:4599 --surface sidebar --expand-projects
+bun run profile:scroll -- --url http://127.0.0.1:4599 --surface diff --session <session in the massive repo>
+bun run profile:scroll -- ... --baseline artifacts/scroll-before --budget-slow-frames 5 --budget-longest-frame 50
+```
+
+`chat` scrolls up into history, `sidebar` and `diff` scroll down; `--direction`
+overrides that. The frame budget is the display's own refresh interval,
+measured over a quiet 1.5 s before the scroll, and a frame counts as slow when
+it took longer than one and a half of those. A 144 Hz display is therefore
+judged against 6.9 ms and a 60 Hz one against 16.7 ms.
+
+A figure about a real display needs a headed run on that display. Headless
+Chrome draws at a fixed 60 Hz of its own; its numbers compare two builds on
+the same scenario but say nothing about 144 Hz. A headed window that is hidden,
+or a display that is off or asleep, draws no frames at all, and the command
+fails before scrolling rather than measuring nothing.
+
+It fails, too, when the surface is missing, when the wheel point is covered by
+another element, when the chat rendered no messages, and when the surface did
+not move.
+
+Each surface gets its own browser profile. The app persists open panels, so a
+`diff` run sharing a profile with the next `sidebar` run left a 40k-node diff
+mounted underneath it and made the sidebar look five times heavier than it is.
+
+Measured on 2026-09-29 against the default workspace, production build,
+headless, before any fix (one run each, so read the spread as ±a few points):
+
+| Surface | fps | Missed refresh | Longest frame | Long animation frames |
+|---|---|---|---|---|
+| chat, 1.2k messages, up | 50 | 17 % | 167 ms | 1.5 s |
+| sidebar, 401 projects expanded, down | 39 | 33 % | 100 ms | 4.5 s |
+| diff, ~1k changed files, down | 32 | 58 % | 117 ms | 5.5 s |
+
+Every run also recorded 250-770 background requests to `/api/provider`,
+`/api/model` and `/api/model/default` inside the 8-second scroll.
+
 ## profile:startup
 
 Launches a packaged Desktop build and reports, per launch, milliseconds since
@@ -372,7 +459,7 @@ be a measurement, never a disabled instrument.
 | `cdp.mjs` | Chrome launch, target discovery, minimal CDP client. Owns the anti-throttling launch flags. |
 | `metrics.mjs` | Metric derivations shared by the profilers: growth rates, percentiles, long-task, trace-event and per-thread summaries. |
 | `process-cpu.mjs` | CPU per process from cumulative counters: Chrome through browser-level `SystemInfo`, the server and its OpenCode child through `ps`. Unresolved processes are reported as missing, never as zero. |
-| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. |
+| `fixture-provider.mjs` | Deterministic OpenAI-compatible provider: one fixed document at a rate chosen by model name. Exports `startFixtureProvider` and `fixtureProviderConfig` for `perf:workspace`. |
 | `cpu-profile.mjs` | Aggregates `Profiler.stop()` output into self time per function. |
 | `idle-probe.mjs` | Page-side instrumentation installed before application code runs; attributes scheduled work to the call site that scheduled it. Must never change observable behaviour. |
 | `scenario.mjs` | Shared scenario setup, currently sidebar expansion. Setup always runs before the measured window. |

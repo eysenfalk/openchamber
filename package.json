@@ -94,7 +94,9 @@
     "profile:session": "node scripts/profile-session.mjs",
     "profile:animation": "node scripts/profile-animation.mjs",
     "profile:switch": "node scripts/profile-switch.mjs",
-    "profile:startup": "node scripts/profile-startup.mjs"
+    "profile:startup": "node scripts/profile-startup.mjs",
+    "profile:scroll": "node scripts/profile-scroll.mjs",
+    "perf:workspace": "node scripts/perf-workspace.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

@@ -37,7 +37,9 @@ const FIXTURE_RATES = [100, 300, 600, 1200]
 const FIXTURE_CODE_RATES = [300, 1200]
 const FIXTURE_THINK_SECONDS = [30]
 const FIXTURE_AGENT_STEPS = [20, 40]
-const FIXTURE_AGENT_RATES = [300]
+// 6000 characters/s exists to build long sessions quickly (`perf:workspace`),
+// not to be measured.
+const FIXTURE_AGENT_RATES = [300, 6000]
 const THINK_ANSWER = "Done."
 const CHUNK_CHARACTERS = 4
 
@@ -151,12 +153,15 @@ const parseModel = (model) => {
 
 /**
  * What this request should answer. An agent model counts the tool results
- * already in the conversation: while steps remain it says a line and calls a
- * tool, and once every step has run it streams the document.
+ * since the last user message: while steps remain it says a line and calls a
+ * tool, and once every step has run it streams the document. Counting only the
+ * current turn keeps every turn of a reused session agent-shaped.
  */
 const planResponse = (model, body) => {
   const { delayMs, charactersPerSecond, document, toolSteps } = parseModel(model)
-  const toolResults = (Array.isArray(body.messages) ? body.messages : []).filter((message) => message?.role === "tool").length
+  const messages = Array.isArray(body.messages) ? body.messages : []
+  const turnStart = messages.findLastIndex((message) => message?.role === "user") + 1
+  const toolResults = messages.slice(turnStart).filter((message) => message?.role === "tool").length
   if (toolSteps > 0 && toolResults < toolSteps) {
     const step = toolResults + 1
     return {
@@ -240,7 +245,7 @@ const streamCompletion = async (response, model, body) => {
   response.end("data: [DONE]\n\n")
 }
 
-const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
+export const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
   const server = createServer(async (request, response) => {
     if (request.method !== "POST" || !request.url?.endsWith("/chat/completions")) {
       response.writeHead(404).end()
@@ -268,7 +273,7 @@ const startFixtureProvider = (port) => new Promise((resolveServer, reject) => {
 })
 
 /** OpenCode configuration that registers this provider; pass it as `OPENCODE_CONFIG_CONTENT`. */
-const fixtureProviderConfig = (port) => ({
+export const fixtureProviderConfig = (port) => ({
   provider: {
     [FIXTURE_PROVIDER_ID]: {
       npm: "@ai-sdk/openai-compatible",
