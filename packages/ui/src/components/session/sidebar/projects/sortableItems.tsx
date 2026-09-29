@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { SidebarTooltip } from '../SidebarTooltip';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
@@ -303,8 +303,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-              ) : <Tooltip>
-                <TooltipTrigger asChild>
+              ) : <SidebarTooltip content={projectDescription} side="right" sideOffset={8}>
                     <button
                       type="button"
                       onMouseDown={handleToggleMouseDown}
@@ -341,19 +340,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     ) : null}
                     {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className="ml-auto" /> : null}
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="right" sideOffset={8}>
-                  {projectDescription}
-                </TooltipContent>
-              </Tooltip>}
+              </SidebarTooltip>}
 
               <div className={cn(
                 'absolute top-1/2 z-10 flex -translate-y-1/2 items-center gap-1',
                 showCreateButtons ? 'right-7' : 'right-0.5',
               )}>
                 {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                  <SidebarTooltip content={<p>{t('sessions.sidebar.project.actions.newWorktreeEllipsis')}</p>} side="bottom" sideOffset={4}>
                       <button
                         type="button"
                         onClick={(e) => {
@@ -368,11 +362,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       >
                         <Icon name="node-tree" className="h-4 w-4" />
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{t('sessions.sidebar.project.actions.newWorktreeEllipsis')}</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  </SidebarTooltip>
                 ) : null}
 
                 {!hideDirectoryControls ? (
@@ -408,8 +398,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
               {showCreateButtons && onNewSession ? (
                 <div className="absolute right-0.5 top-1/2 z-10 -translate-y-1/2">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
+                  <SidebarTooltip
+                    content={<p>{isRepo
+                      ? t('sessions.sidebar.project.actions.newDraftSession')
+                      : t('sessions.sidebar.project.actions.newSession')}</p>}
+                    side="bottom"
+                    sideOffset={4}
+                  >
                       <button
                         type="button"
                         onClick={(e) => {
@@ -426,13 +421,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       >
                         <Icon name="add" className="h-4 w-4" />
                       </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{isRepo
-                        ? t('sessions.sidebar.project.actions.newDraftSession')
-                        : t('sessions.sidebar.project.actions.newSession')}</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  </SidebarTooltip>
                 </div>
               ) : null}
             </div>

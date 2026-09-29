@@ -16,11 +16,14 @@ import React from 'react';
  * overflow onto a clipped second line leaves the dropped fact's width behind as
  * a hole in the middle of the row.
  *
- * The measuring is deliberately blunt: a handful of layout reads after each
- * render of a row that exists once per turn, and only for the turns on screen.
+ * Measuring forces a synchronous layout, so it runs only when the row's markup
+ * changed since the last fit or the row was resized: a footer re-rendered with
+ * the same content (every mounted footer, on every streamed update) costs a
+ * string comparison instead of a layout.
  */
 export const useFactsFit = (ref: React.RefObject<HTMLElement | null>): void => {
   const applyRef = React.useRef<() => void>(() => {});
+  const fittedMarkupRef = React.useRef<string | null>(null);
 
   applyRef.current = () => {
     const container = ref.current;
@@ -36,15 +39,19 @@ export const useFactsFit = (ref: React.RefObject<HTMLElement | null>): void => {
 
     const modelFits = () => model.scrollWidth <= model.clientWidth + 1;
     for (const fact of facts) {
-      if (modelFits()) return;
+      if (modelFits()) break;
       fact.style.display = 'none';
     }
+    // Read after hiding, so the next unchanged render matches it.
+    fittedMarkupRef.current = container.innerHTML;
   };
 
-  // After every render: the facts change while a turn finishes (the duration
-  // keeps counting), and that changes what fits without changing any box the
-  // observer below watches.
+  // After a render that changed the row: the facts change while a turn
+  // finishes (the duration keeps counting), and that changes what fits without
+  // changing any box the observer below watches.
   React.useLayoutEffect(() => {
+    const container = ref.current;
+    if (!container || container.innerHTML === fittedMarkupRef.current) return;
     applyRef.current();
   });
 

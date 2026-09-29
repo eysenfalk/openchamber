@@ -28,7 +28,39 @@ interface TimelineDialogProps {
     onLoadEarlier?: () => void;
 }
 
-export const TimelineDialog: React.FC<TimelineDialogProps> = ({
+// The dialog stays mounted with the chat, but its contents only exist while it
+// is open: the body subscribes to every message of the session, so rendering
+// it while closed re-ran the whole list on each streamed update.
+export const TimelineDialog: React.FC<TimelineDialogProps> = ({ open, onOpenChange, ...bodyProps }) => {
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    // Kept here so a search survives closing and reopening the dialog.
+    const [searchQuery, setSearchQuery] = React.useState('');
+
+    if (!currentSessionId) return null;
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto">
+                <TimelineDialogBody
+                    {...bodyProps}
+                    open={open}
+                    onOpenChange={onOpenChange}
+                    sessionId={currentSessionId}
+                    searchQuery={searchQuery}
+                    onSearchQueryChange={setSearchQuery}
+                />
+            </DialogContent>
+        </Dialog>
+    );
+};
+
+interface TimelineDialogBodyProps extends TimelineDialogProps {
+    sessionId: string;
+    searchQuery: string;
+    onSearchQueryChange: (query: string) => void;
+}
+
+const TimelineDialogBody: React.FC<TimelineDialogBodyProps> = ({
     open,
     onOpenChange,
     onScrollToMessage,
@@ -37,38 +69,36 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     canLoadEarlier = false,
     isLoadingEarlier = false,
     onLoadEarlier,
+    sessionId,
+    searchQuery,
+    onSearchQueryChange: setSearchQuery,
 }) => {
-    const { t } = useI18n();
-    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const messages = useSessionMessageRecords(currentSessionId ?? '');
+    const { t, locale } = useI18n();
+    const messages = useSessionMessageRecords(sessionId);
     const revertToMessage = useSessionUIStore((state) => state.revertToMessage);
     const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
     const { isMobile, isTablet } = useDeviceInfo();
     const alwaysShowActions = isMobile || isTablet;
 
     const [forkingMessageId, setForkingMessageId] = React.useState<string | null>(null);
-    const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedIndex, setSelectedIndex] = React.useState(0);
     const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
     const listRef = React.useRef<HTMLDivElement | null>(null);
     const pendingLoadAnchorRef = React.useRef<{ messageId: string; top: number } | null>(null);
     const preservingLoadPositionRef = React.useRef(false);
-    const wasOpenRef = React.useRef(open);
+    // The body mounts when the dialog opens, so its first render is an opening.
+    const wasOpenRef = React.useRef(false);
 
-    const formatDateGroup = React.useCallback((timestamp: number): string => {
-        return new Date(timestamp).toLocaleDateString(getCurrentIntlLocale(), {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
-    }, []);
-
-    const formatMessageTime = React.useCallback((timestamp: number): string => {
-        return new Date(timestamp).toLocaleTimeString(getCurrentIntlLocale(), {
-            hour: 'numeric',
-            minute: '2-digit',
-        });
-    }, []);
+    const { formatDateGroup, formatMessageTime } = React.useMemo(() => {
+        void locale;
+        const intlLocale = getCurrentIntlLocale();
+        const dateFormat = new Intl.DateTimeFormat(intlLocale, { year: 'numeric', month: 'short', day: 'numeric' });
+        const timeFormat = new Intl.DateTimeFormat(intlLocale, { hour: 'numeric', minute: '2-digit' });
+        return {
+            formatDateGroup: (timestamp: number): string => dateFormat.format(timestamp),
+            formatMessageTime: (timestamp: number): string => timeFormat.format(timestamp),
+        };
+    }, [locale]);
 
     // Timeline actions are only valid for user messages.
     const userMessages = React.useMemo(() => {
@@ -211,17 +241,14 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
 
     // Handle fork with loading state and session refresh
     const handleFork = async (messageId: string) => {
-        if (!currentSessionId) return;
         setForkingMessageId(messageId);
         try {
-            await forkFromMessage(currentSessionId, messageId);
+            await forkFromMessage(sessionId, messageId);
             onOpenChange(false);
         } finally {
             setForkingMessageId(null);
         }
     };
-
-    if (!currentSessionId) return null;
 
     const turnActions = (
         <>
@@ -250,8 +277,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     );
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-2xl max-h-[70vh] max-md:max-h-[85dvh] flex flex-col overflow-y-auto">
+        <>
                 <DialogHeader className="shrink-0">
                     <DialogTitle className="flex items-center gap-2">
                         <Icon name="time" className="h-5 w-5" />
@@ -362,7 +388,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                             className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                                                             onClick={async (e) => {
                                                                 e.stopPropagation();
-                                                                await revertToMessage(currentSessionId, message.info.id);
+                                                                await revertToMessage(sessionId, message.info.id);
                                                                 onOpenChange(false);
                                                             }}
                                                         >
@@ -426,8 +452,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                         </div>
                     </div>
                 )}
-            </DialogContent>
-        </Dialog>
+        </>
     );
 };
 

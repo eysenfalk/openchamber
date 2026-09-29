@@ -13,6 +13,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { useGitStore, useGitAllBranches, useGitRepoStatusMap } from '@/stores/useGitStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { SidebarTooltipHost } from '@/components/session/sidebar/SidebarTooltip';
 import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { useSessionSearchEffects } from './sidebar/shell/useSessionSearchEffects';
 import { useSessionProjectViewState } from './sidebar/projects/useSessionProjectViewState';
@@ -629,6 +630,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
     // over to the next row without replaying the open delay or exit/enter
     // animation.
     <TooltipProvider delay={400} closeDelay={0} timeout={300}>
+    <SidebarTooltipHost enabled={!mobileVariant}>
     <div
       ref={sessionSearchContainerRef}
       className={cn(
@@ -774,6 +776,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       />
 
     </div>
+    </SidebarTooltipHost>
     </TooltipProvider>
   );
 };

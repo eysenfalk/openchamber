@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { SidebarTooltip } from '../SidebarTooltip';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { canUseElectronDesktopIPC, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
@@ -254,8 +255,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
   };
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
+    <SidebarTooltip content={label} side="left" sideOffset={8}>
         <button
           type="button"
           className={cn(
@@ -273,11 +273,7 @@ const QuickSessionAction = React.memo(function QuickSessionAction({
         >
           <Icon name={shiftHeld ? 'delete-bin' : 'archive'} className={iconSizeClass} />
         </button>
-      </TooltipTrigger>
-      <TooltipContent side="left" sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
+    </SidebarTooltip>
   );
 });
 
@@ -1503,6 +1499,45 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     />
   ) : null;
 
+  // VS Code already shows project context via workspace headers, so the
+  // per-row metadata tooltip is redundant noise there.
+  const rowTooltipContent = !isVSCode && !isTimelineRow ? (
+    <div className="flex min-w-44 flex-col gap-1.5 text-left text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
+        <span className="flex-shrink-0 text-muted-foreground" title={sessionUpdatedLabel}>{sessionCompactUpdatedLabel}</span>
+      </div>
+      {tooltipProjectLabel && !isTimelineRow ? (
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <Icon name="folder" className="h-3 w-3 flex-shrink-0" />
+          <span className="min-w-0 truncate">{tooltipProjectLabel}</span>
+        </div>
+      ) : null}
+      {tooltipBranchLabel ? (
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
+          <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
+        </div>
+      ) : null}
+      {prSummary && prStatusLabel ? (
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
+          <span className="min-w-0 truncate" style={prIconColor ? { color: prIconColor } : undefined}>
+            #{prSummary.number} · {prStatusLabel}
+          </span>
+        </div>
+      ) : null}
+      {currentRecap ? (
+        <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
+      ) : null}
+    </div>
+  ) : null;
+  const renderRowTooltip = (trigger: React.ReactElement): React.ReactNode => (
+    <SidebarTooltip content={rowTooltipContent} side="right" sideOffset={8} className="max-w-xs text-left">
+      {trigger}
+    </SidebarTooltip>
+  );
+
   const sessionMenuContent = (
     <DropdownMenuContent align="end" className="min-w-[180px]" finalFocus={() => {
       if (pendingFolderCreateRef.current) {
@@ -1608,9 +1643,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           {isTimelineRow ? null : leadingIndicators}
           {isTimelineRow ? null : subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
-            {(
-              <Tooltip>
-                <TooltipTrigger asChild>
+            {renderRowTooltip(
                   <button
                     type="button"
 	                    aria-pressed={selectionModeEnabled ? isRowSelected : undefined}
@@ -1737,44 +1770,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                       ) : null}
                     </div>
                     )}
-                  </button>
-                </TooltipTrigger>
-                {/* VS Code already shows project context via workspace headers, so
-                    the per-row metadata tooltip is redundant noise there. */}
-                {!isVSCode && !isTimelineRow ? (
-                <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left">
-                  <div className="flex min-w-44 flex-col gap-1.5 text-left text-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 truncate font-medium text-foreground">{sessionTitle}</span>
-                      <span className="flex-shrink-0 text-muted-foreground" title={sessionUpdatedLabel}>{sessionCompactUpdatedLabel}</span>
-                    </div>
-                    {tooltipProjectLabel && !isTimelineRow ? (
-                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                        <Icon name="folder" className="h-3 w-3 flex-shrink-0" />
-                        <span className="min-w-0 truncate">{tooltipProjectLabel}</span>
-                      </div>
-                    ) : null}
-                    {tooltipBranchLabel ? (
-                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                        <Icon name="git-branch" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
-                        <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
-                      </div>
-                    ) : null}
-                    {prSummary && prStatusLabel ? (
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <Icon name="git-pull-request" className="h-3 w-3 flex-shrink-0" style={prIconColor ? { color: prIconColor } : undefined} />
-                        <span className="min-w-0 truncate" style={prIconColor ? { color: prIconColor } : undefined}>
-                          #{prSummary.number} · {prStatusLabel}
-                        </span>
-                      </div>
-                    ) : null}
-                    {currentRecap ? (
-                      <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
-                    ) : null}
-                  </div>
-                </TooltipContent>
-                ) : null}
-              </Tooltip>
+                  </button>,
             )}
           </div>
 
@@ -1836,8 +1832,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
               />
             ) : null}
             {showOpenInEditorAction ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
+              <SidebarTooltip content={t('sessions.sidebar.session.actions.openInEditor')} side="left" sideOffset={8}>
                   <button
                     type="button"
                     className={cn(
@@ -1852,11 +1847,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                   >
                     <Icon name="external-link" className={actionIconSizeClass} />
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="left" sideOffset={8}>
-                  {t('sessions.sidebar.session.actions.openInEditor')}
-                </TooltipContent>
-              </Tooltip>
+              </SidebarTooltip>
             ) : null}
             <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange} onOpenChangeComplete={handleMenuOpenChangeComplete}>
               <DropdownMenuTrigger asChild>
